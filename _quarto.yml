@@ -1,0 +1,25 @@
+project:
+  type: book
+
+freeze: auto
+
+book:
+  title: "Bayesian Analysis with Python: Notebook"
+  author: "Norah Jones"
+  date: "7/30/2025"
+  chapters:
+    - index.qmd
+    - thinking-probabilistically.qmd
+    - summary.qmd
+    - references.qmd
+
+
+format:
+  html:
+    theme:
+      - cosmo
+      - brand
+
+
+
+

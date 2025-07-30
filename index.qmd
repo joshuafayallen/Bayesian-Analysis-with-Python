@@ -1,0 +1,3 @@
+# Preface {.unnumbered}
+
+This is my notebook for Bayesian Analysis with Python. I deviate slightly from the book because I am more of a polars person than a pandas person. If you notice anything that could be improved or any typos please feel free to raise an issue. I am also playing around with `marimo` and quarto. 

@@ -1,0 +1,67 @@
+---
+filters:
+    - marimo-team/marimo 
+---
+
+# Thinking Probabilistically 
+
+```{python}
+#| echo: false
+import polars as pl 
+import polars.selectors as cs
+from great_tables import GT 
+
+```
+
+## A Probability Primer for Bayesian Practitioners 
+
+###  Sample space and events 
+
+Lets say we go out and ask 3 random respondents a series of three questions and record their answers. There are lots of ways we could represent. In @tbl-samp-space I remix the example in the book a bit but the core idea is the same. The *sample space* is the set of all possible outcomes. 
+
+```{python}
+#| echo: false
+#| label: tbl-samp-space
+sample_space = pl.DataFrame({
+    'Person 1': ['yes', 'yes', 'yes'],
+    'Person 2': ['no', 'no', 'no'],
+    'Question': ['1', '2', '3']
+}).unpivot(on = cs.contains('Person'), index = 'Question', variable_name='Individual', value_name='Response')
+
+GT(sample_space)
+```
+
+In our case, we are just talking about the order of each person's responses. An event is a subset of the feature space, so we can think of it as the order in which people respond to the questions. So there are eight possible *combinations* of answer orders. For brevity, I only include two of those events. If we wanted to know how likely it is that we observe an event, we can express it as a simple proportion. 
+
+$$
+P(Event) = \frac{\text{event we are interested in}}{\text{total number of events}}
+$$
+
+So if we are interested in the all yes event, it is just `{python} 1/8`. If we make the assumption that the events are independent of each other then the probability of observing an event where the respondent answers all yes and another respondent answers all no than we can represent that as:
+
+$$
+P(\text{All Yes and No}) = \frac{1}{8} + \frac{1}{8} = \frac{2}{8} = 0.25
+$$
+
+
+Fast forward a bit the three axioms of probability are: 
+
+1. The probability of an event is an even is a non-negative real number 
+2. The probability of P(sample space) = 1
+3. If 𝐴1, 𝐴2,… are disjoint events, meaning they cannot occur simultaneously then
+𝑃(𝐴1, 𝐴2, …) = 𝑃(𝐴1) + 𝑃(𝐴2) + …
+
+### Random Variables 
+
+
+A random variable is effectively a function that maps the sample space the real numbers. So we can think of that as. Doing something akin to: 
+
+
+```{python}
+#| echo: false
+ex = sample_space.with_columns(
+    pl.when(pl.col('Response') == 'yes').then(1).otherwise(0).alias('Mapping Examp')
+)
+
+GT(ex)
+```
