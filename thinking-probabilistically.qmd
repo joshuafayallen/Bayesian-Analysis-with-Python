@@ -142,9 +142,45 @@ bb.plot_interactive(figsize = (10,6), pointinterval=False, xy_lim =(20,20))
 
 From the highest level of abstraction all our models are really just fancy conditional probability machines. Given an outcome variable how does it change if we observe these 1 to a million things. To keep it more manageable than lets just consider the bivariate case. If we are trying to understand how something about how good an NFL team is we might want to look at their EPA and condition on adjusted games lost. The more games that a team's best players lose the worse their EPA is going to be. By knowing something about EPA we know a little bit something about their 
 
-We would anticipate that the higher a team's EPA is the less adjusted games lost they have. If we plot the marginal distributions we can see that. Quickly to compute the marginal distribution of AGL we are going to take the p(AGL, EPA) and then we average over EPA.
+We would anticipate that the higher a team's EPA is the less adjusted games lost they have. If we plot the marginal distributions we can see that. Quickly to compute the marginal distribution of AGL we are going to take the p(AGL, EPA) and then we average over EPA. In @fig-marginals we can see that a bit more clearly. The dashed lines are the conditional probabilities when we sample from the p(AGL, EPA).
 
 
 ```{python}
+#| label: fig-marginals
+#| code-fold: true
+
+# take steps of 0.1 from -4 to 4 effectively just seq(-4, 4, by = 0.1)
+x,y = np.mgrid[-4:4:0.1, -4:4:0.1]
+
+pos = np.empty(x.shape + (2,))
+
+## fill the empty 3d array 
+pos[:, :, 0] = x; pos[:,:0] = y
+
+## initialize a multivariate normal 
+
+rv = pz.MvNormal([0,0], [[1,0.8,
+                          0.8, 1]])
+
+x_value = pos[:, :, 0][:, 0]
+
+x_density = rv.pdf(pos)
+
+left, width = 0.1, 0.65
+bottom, height = 0.1, 0.65
+bottom_h = left_h = left + width + 0.02
+
+rect_scatter = [left, bottom, width, height]
+rect_histx = [left, bottom_h, width, 0.2]
+rect_histy = [left_h, bottom, 0.2, height]
+
+# this is effectively making small multiples
+# that we then place in the positions defined above 
+_, axes_arr = plt.subplots(1,3, figsize=(8,8))
+
+ax_joint, ax_x, ax_y = axes_arr
+ax_joint.set_position(rect_scatter)
+ax_x.set_postion(rect_histx)
+ax_y.set_position(rect_histy)
 
 ```
