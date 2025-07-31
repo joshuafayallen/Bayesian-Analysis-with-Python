@@ -1,7 +1,3 @@
----
-filters:
-    - marimo-team/marimo 
----
 
 # Thinking Probabilistically 
 
@@ -9,6 +5,8 @@ filters:
 #| echo: false
 import polars as pl 
 import polars.selectors as cs
+from scipy.special import binom, beta
+import preliz as pz
 from great_tables import GT 
 
 ```
@@ -64,4 +62,89 @@ ex = sample_space.with_columns(
 )
 
 GT(ex)
+```
+
+The author uses the example of a set of Python code. So if the take example from `pl.when(thing_happens).then(do this).otherwise(do that)` this is an abstraction over a set of Rust code that takes our inputs and then maps them to our desired output. We could theoretically write out all this Rust code every single time. But we package it in a nice set of functions to make the end user's code cleaner and reusable we make some functions to do this. 
+
+Random variables play this similar role in stats where we have some inputs like responses to a survey or temperature that get mapped onto some process. There is no randomness when moving from "yes" to "one", but there *is* some randomness when we go to the survey the third and fourth person to get their event. 
+
+### Discrete random variables and their distributions
+
+We generally don't care about the kidns of problems that get presented in these refreshers. The probability of 3 inidividuals answering all yes or the probability of getting a one on the dice. In general we are more intersted in getting a list of probabilities for all possible answers. We can then get the possibilities of any sort of event we would care about. As a simple heuristic the list of the probabilities are effectively just this list of probabilities. So if we wanted to get the proportion of heads of 1000 flipped coins we could do this. 
+
+```{python}
+#| label: fig-coin-flips
+#| echo: false
+import numpy as np 
+import matplotlib.pyplot as plt 
+
+flips = np.random.choice(['heads', 'tails'], size = 1000, replace = True)
+
+coin_flips = pl.DataFrame({
+    'heads_proportion': np.cumsum(flips == 'heads')/np.arange(1, 1000 + 1),
+    'flip_number': np.arange(1, 1000 + 1)
+})
+
+plt.figure(figsize=(10,6))
+plt.hist(coin_flips['heads_proportion'])
+
+
+```
+
+In this case the probability distribution of a coin flip is a Bernouli distribution. When we have multiple Bernouli trials we can stack them and make a binomial. One thing about these functions is that they have, for lack of a better term, shape parameters. For a normal those are our mean and standard deviation for something like the beta binomial in `rbinom()` it is `rbinom(shape1 = 2, shape2 = 9)` which changes where the most likely outcomes are. 
+
+
+```{python}
+#| code-fold: true
+
+np.random.seed(1994)
+
+from cycler import cycler
+default_cycler = cycler(color=["#000000", "#6a6a6a", "#bebebe", "#2a2eec"])
+
+plt.rc('axes', prop_cycle=default_cycler)
+plt.rc('figure', dpi=600)
+
+n = 5
+
+x = np.arange(0,5)
+fig, axes = plt.subplots(2,2, figsize = (10,6), sharey= True, sharex = True)
+axes = np.ravel(axes)
+
+
+for ax, (alpha, bt) in zip(axes, ((1,1), (6,4),(4,6), (20,20))):
+    dist_pmf = binom(n, x) * (beta(x+alpha, n-x+bt) / beta(alpha, bt))
+    ax.vlines(x, 0, dist_pmf, colors = 'C0', lw=4)
+    ax.set_title(f"α={alpha}, β={bt}")
+    ax.set_xticks(x)
+    ax.set_xticklabels(x + 1)
+
+fig.text(0.52, -0.04, "x", fontsize=18)
+fig.text(-0.04, 0.4, "P(X=x)", fontsize=18, rotation="vertical")
+```
+
+
+While this is helpful for us as we are toying around with setting priors or as pedagogy. The thing that is doing the heavy lifting of mapping things to the like P(thing) = 0.6 is the probability mass function. This works for discrete data because you can't have 1.5 heads. I eschew including it but one really helpful thing to help us wrap our heads around what changing the shape parameters of our distribution are is using the interactive plots. 
+
+
+```{python}
+#| out.width: "20%"
+
+bb = pz.BetaBinomial(alpha = 10, beta = 10, n = 6)
+
+bb.plot_interactive(figsize = (10,6), pointinterval=False, xy_lim =(20,20))
+
+
+```
+
+
+### Conditional Probablities 
+
+From the highest level of abstraction all our models are really just fancy conditional probability machines. Given an outcome variable how does it change if we observe these 1 to a million things. To keep it more manageable than lets just consider the bivariate case. If we are trying to understand how something about how good an NFL team is we might want to look at their EPA and condition on adjusted games lost. The more games that a team's best players lose the worse their EPA is going to be. By knowing something about EPA we know a little bit something about their 
+
+We would anticipate that the higher a team's EPA is the less adjusted games lost they have. If we plot the marginal distributions we can see that. Quickly to compute the marginal distribution of AGL we are going to take the p(AGL, EPA) and then we average over EPA.
+
+
+```{python}
+
 ```
