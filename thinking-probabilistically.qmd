@@ -124,7 +124,7 @@ fig.text(-0.04, 0.4, "P(X=x)", fontsize=18, rotation="vertical")
 ```
 
 
-While this is helpful for us as we are toying around with setting priors or as pedagogy. The thing that is doing the heavy lifting of mapping things to the like P(thing) = 0.6 is the probability mass function. This works for discrete data because you can't have 1.5 heads. I eschew including it but one really helpful thing to help us wrap our heads around what changing the shape parameters of our distribution are is using the interactive plots. 
+While this is helpful for us as we are toying around with setting priors or as pedagogy. The thing that is doing the heavy lifting of mapping things to the like P(thing) = 0.6 is the *probability mass function*. This works for discrete data because you can't have 1.5 heads. I eschew including it but one really helpful thing to help us wrap our heads around what changing the shape parameters of our distribution are is using the interactive plots. 
 
 
 ```{python}
@@ -138,6 +138,15 @@ bb.plot_interactive(figsize = (10,6), pointinterval=False, xy_lim =(20,20))
 ```
 
 
+### Continous random variables and their distributions 
+
+Continous values are a bit different. They, theoretically, can go go from $-\infty$ to $\infty$ so the mapping has to work a little bit differently. Instead of a probalility mass function where we are moving from heads to 1 we have to effectively create *bins* and we count how many values fall in each bin. If we take a simple example of going from -1 to 1 we can get a huge number of points. So the actual probablity of getting exactly one in this context is `{python} 1/100` making it somewhat useless to do probablility like this. Hence why we take this density approach. 
+
+
+### Cumulative distribution function
+
+Finally we have the CDF to characterize distributions. The CDF of a random variable is kind of just the idea that we can take the mappings of a PMF or a PDF and then just map them onto a fairly simple question. What is the probability we get a point as big or less than the point we drew from that distribution. 
+
 ### Conditional Probablities 
 
 From the highest level of abstraction all our models are really just fancy conditional probability machines. Given an outcome variable how does it change if we observe these 1 to a million things. To keep it more manageable than lets just consider the bivariate case. If we are trying to understand how something about how good an NFL team is we might want to look at their EPA and condition on adjusted games lost. The more games that a team's best players lose the worse their EPA is going to be. By knowing something about EPA we know a little bit something about their 
@@ -150,20 +159,20 @@ We would anticipate that the higher a team's EPA is the less adjusted games lost
 #| code-fold: true
 
 # take steps of 0.1 from -4 to 4 effectively just seq(-4, 4, by = 0.1)
-x,y = np.mgrid[-4:4:0.1, -4:4:0.1]
-
+x, y = np.mgrid[-4:4:.01, -4:4:.01]
 pos = np.empty(x.shape + (2,))
+pos[:, :, 0] = x; pos[:, :, 1] = y
 
 ## fill the empty 3d array 
-pos[:, :, 0] = x; pos[:,:0] = y
+pos[:, :, 0] = x; pos[:, :, 1] = y
 
 ## initialize a multivariate normal 
 
-rv = pz.MvNormal([0,0], [[1,0.8,
-                          0.8, 1]])
+rv = pz.MvNormal([0, 0], [[1, 0.8], 
+                          [0.8, 1]])
 
-x_value = pos[:, :, 0][:, 0]
 
+x_value = pos[:, :, 0][:,0]
 x_density = rv.pdf(pos)
 
 left, width = 0.1, 0.65
@@ -176,11 +185,145 @@ rect_histy = [left_h, bottom, 0.2, height]
 
 # this is effectively making small multiples
 # that we then place in the positions defined above 
-_, axes_arr = plt.subplots(1,3, figsize=(8,8))
+_, axes_arr = plt.subplots(1, 3, figsize=(8, 8))
 
 ax_joint, ax_x, ax_y = axes_arr
 ax_joint.set_position(rect_scatter)
-ax_x.set_postion(rect_histx)
+ax_x.set_position(rect_histx)
 ax_y.set_position(rect_histy)
 
+ax_joint.imshow(x_density, cmap='cet_gray_r', origin='lower', extent=[-3, 3, -3, 3])
+
+# these are effectively arbitrary as long as they are within the grid
+ax_joint.plot(x_value, x_density[400]*2, 'k:', lw=2)
+ax_joint.plot(x_value, x_density[500]*2+1, 'k:', lw=2)
+ax_joint.plot(x_value, x_density[300]*2-1, 'k:', lw=2)
+
+
+ax_x.fill_between(x_value, x_density.sum(1), color = 'C2')
+ax_y.fill_between(x_value, x_density.sum(1), color = 'C2')
+
+for ax in [ax_joint, ax_x, ax_y]:
+    ax.grid(False)
+    ax.set_facecolor('w')
+    ax.set_xticks([])
+    ax.set_yticks([])
+ax_joint.set_xlim(-3, 3)
+ax_joint.set_ylim(-3, 3)
+ax_x.set_xlim(-3, 3)
+ax_y.set_ylim(-3, 3)
+ax_x.set_xlim(-3, 3)
+ax_joint.set_ylabel('$B$', rotation=0, labelpad=20, fontsize=18)
+ax_joint.set_xlabel('$A$', fontsize=18)
+
+ax_joint.text(-2.5, 2.5, '$p(EPA, AGL)$', fontsize=18, color='k', weight='medium')
+ax_y.text(10, 0, '$p(GPL)$', fontsize=18, color='k', weight='medium')
+ax_x.text(-0.2, 15, '$p(EPA)$', fontsize=18, color='k', weight='medium')
+ax_joint.text(1, -2, ' ... $p(EPA \mid AGL)$', fontsize=18, color='k', weight='medium')
+
+```
+
+
+### Expected Values 
+
+Lets say that we have a discrete random variable **X**. We can compute its expected value as: 
+
+$$
+E(X) = \Sigma_{x} xP(X=x)
+$$
+
+Which is just another way of expressing the average. This is one version of an expected value. Instead of doing the usual hand calculating of a mean. The variance is also another form of an expected value. Sometimes we refer to these as the moment of a distribution. In a Gaussian distribution we also have something called kurtosis which tells us how much stuff is in the tails of the distribution. We also has skewness which shifts where the masses are so we could do something like this. 
+
+
+```{python}
+
+_, ax = plt.subplots(2,2, figsize = (12,6), sharex=True)
+
+pz.Normal(0, 1).plot_pdf(ax=ax[0, 0], moments=["m", "d", "s", "k"], legend="title")
+pz.BetaScaled(1.1, 1.1, -4, 4).plot_pdf(ax=ax[0, 1], moments=["m", "d", "s", "k"], legend="title")
+pz.SkewNormal(0, 1, 3).plot_pdf(ax=ax[1, 0], moments=["m", "d", "s", "k"], legend="title")
+pz.StudentT(3, 0, 1).plot_pdf(ax=ax[1, 1], moments=["m", "d", "s", "k"], legend="title", support=(-7, 7))
+
+```
+
+## Bayes Theorum 
+
+Lets fastforward a bit so we can express Bayes' rule as 
+
+$$
+\overbrace{p(hypothesis | data)}^{Posterior} = \frac{\overbrace{p(data | hypothesis)}^{likelihood}\overbrace{p(hypothesis)}^{prior}}{\underbrace{P(data)}_{marginal likelihood}}
+$$
+
+
+- **Prior**: The prior is a reflection of what we know about the hypothesis prior to ever seeing the data. There are a lot of ways to think of priors which is always something that is a bit difficult to wrangle our head around. In a machine learning framework we could think of a prior as a form of regularization. We don't actually think every value from 0-1 are equally likely in a model of EPA. If we draw a QB from a Beta distribution it is unlikely that we are going to draw a QB has an EPA of 0.9.^[For reference the EPA/Play leader in 2024 was Jared Goff with 0.29 and the leader in 2023 was Brock Purdy with 0.338/] From a classical statistical perspective we can really just think of the prior as a more apparent assumption we are making. 
+
+- **Likelihood**: The likelihood is the way we introduce data to our analysis. So in the model it is really just "what is the probability of the data conditional on the hypothesis". So in an OLS the likelihood is just the normal pdf. 
+
+- **Posterior**: The posterior practically is just the product of the likelihood and the prior. So to put this a bit more concretly: it is the probability of the data conditional on the hypothesis multiplied by what believe before seeing the data. This is itself a probability distribution. A conjugate prior of a likelihood is a prior that, when used in combination with a given likelihood, returns a posterior with the same functional form as the prior
+
+## Single Parameter inference
+
+### The Coin-flipping problem 
+
+Lets say we are not the biggest joy to have at parties. We corner some unlucky party goers and we want to know if the quarter is fair coin. This could be important if we want to model the bias of a coin especially if we are like trying to figure out how to game the coin flip for a game or something. Really this is just a pedagocial example so no need to dwell on it that much. 
+
+### Choosing A likelihood 
+
+If we assume that these trials are independent. Meaning if its just me and a friend flipping coins we find in the street we can assume that these are independent. For this we can safely use the Binomial likelihood. To make this a little more concrete lets write out the likelihood with our toy example 
+
+$$
+p(\text{getting heads} | \Theta) = \frac{\text{Number of Tosses}!}{\text{getting heads}!(Tosses - \text{getting heads})!}\Theta^{\text{Getting Heads}} (1 - \Theta)^{\text{Tosses - \text{Getting Heads}}}
+$$
+
+
+
+```{python}
+
+n_trials = [1,2, 5]
+getting_heads = [0.25, .5, 0.75]
+
+
+_,axes = plt.subplots(3,3, figsize = (12,6), sharex = True, sharey = True)
+for i, n in enumerate(n_trials):
+    for j, p in enumerate(getting_heads):
+        pz.Binomial(n, p).plot_pdf(legend = 'title', ax = axes[i, j])
+
+
+```
+
+When we look at the plots as the number of trials grow we get more or less a probability of approx 50/50. When we change the probability to 0.5 and a t one trial it fits our mental model fairly well. While this is not always feasible it definitely helps. 
+
+### Choosing a prior 
+
+A natural choice for our prior is the the beta distrbitution. It is bounded between 0 and 1 which helps in our coin flip problem but is especially helpful for proportions. We would have to play with our shape parameters a bit but. A mostly symetric shape around .5 makes the most sense a priori. We are not going to entirely rule out a biased coin in any direction but we feel pretty confident that over like 20 trials the proportion of heads is going to be closer to .5 than it is 1 or 0. The big benefit computationally is that the Beta distribution and the binomial are that it returns a posterior that is the same functional form of the prior making it easier to explore the posterior. This was a much bigger deal in olden times.^[By olden times we are really talking closer to like your childhood.]
+
+### How to choose priors 
+
+As a Bayesian we do want the data to speak for itself. But we don't have to pretend like we don't know anything about the data. We really want to shoot for weakly informative priors. We know that a player or an offense generating close to 1 EPA/play is next to impossible in the NFL. Like it could theoretically happen but that would likely require us to take a top 5 offense in the NFL in the past 5-10 years and transport it back to when players were moonlighting in the offseason. However, we are probably not likely to see that or would not be a fun excercise to undertake. Instead we can impose some weakly informative priors to encourage our models to explore a reasonable set of bounds of the posterior distribution. 
+
+
+One helpful way we can start to do prior tuning is using `preliz`. In some respects we could theoretically just hand derive it but that is not a good use of our time. In the plot below we are just saying 90% of values should be between 0.1 and 0.7. This will then spit out the priors in the legend. We can then take this prior and feed it over to our modeling packages which is super nice. Since sometimes hand deriving logit priors and beta priors is supertedious. 
+ 
+
+
+```{python}
+dist = pz.Beta()
+
+pz.maxent(dist, 0.1, 0.7, 0.9)
+
+
+pz.Beta(alpha = 2.47, beta = 3.61).to_pymc()
+
+```
+
+
+## Excercises 
+
+These will be a bit briefer than the ones in the book. 
+
+3. Use PreliZ to explore different parameters for the BetaBinomial and Gaussian distribution. 
+
+
+```{python}
+# _, ax = plt.subplots(2,2, figsize = (12,6), sharex  )
 ```

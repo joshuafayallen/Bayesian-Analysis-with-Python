@@ -1,0 +1,455 @@
+# Programming Probabilistically
+
+Last chapter was kind of a primer that is worth going over from time to time. But the nuts and bolts of why you spent the 30ish dolars is to learn PyMc and how to do Bayesian modeling in Python. 
+
+## Flipping coins with PyMC
+
+Lets repeat the coin flipping problem in PyMC in our case we can set a real value for $\Theta$ and creatively name it theta real. 
+
+```{python}
+import arviz as az
+import matplotlib.pyplot as plt
+import numpy as np
+import polars as pl 
+import polars.selectors as cs
+import preliz as pz
+import pymc as pm
+
+np.random.seed(1994)
+
+theta_real = 0.35
+
+trials = 4
+
+data = pz.Binomial(n = 1, p = theta_real).rvs(trials)
+
+
+
+```
+
+No we have a mode lets go and define as 
+
+$$
+\begin{aligned}
+\Theta \sim Beta(\alpha = 1, \beta = 1) \\
+Y \sim Binomial (n = 1, p = \Theta)
+
+\end{aligned}
+$$
+
+What is fun about PyMC is that we specify the model in a broadly similar way to Stan. So this model becomes 
+
+```{python}
+
+
+with pm.Model() as our_first_mod:
+    theta = pm.Beta('theta', alpha = 1., beta = 1.)
+    y = pm.Bernoulli('y', p = theta, observed = data)
+    idata = pm.sample(1000, nuts_sampler='nutpie')
+
+
+```
+
+
+## Summarzing the Posterior 
+
+There are some built in methods to summarize the data and check the health of our chains. 
+
+
+```{python}
+
+
+az.plot_trace(idata)
+
+```
+
+She looks pretty good nothing like sticks out all that much. I am probably going to be a little more partial to the ggdist. One of the nice things is that we can extract the data like this.
+
+
+```{python}
+
+out = pl.from_pandas(idata.to_dataframe())
+
+out.write_parquet("data/first_mod_samps.parquet")
+
+```
+
+Then we can then go ahead and load and summarize her like this. This is likely just going to be more helpful if I want to make really specific plots with ggplot than using using arviz. This is nothing personal against arviz I just have more experience in ggplot. 
+
+```
+library(arrow)
+library(ggdist)
+library(tidyverse)
+
+first_mod = read_parquet(here::here('data', 'first_mod_samps.parquet')) |>
+    janitor::clean_names()
+
+
+ggplot(first_mod, aes(x = posterior_theta)) +
+    stat_halfeye()
+
+```
+
+If we want to take a quick peak at some of summary statistics we can do 
+
+
+```{python}
+az.summary(idata, kind = 'stats').round(2)
+```
+
+WHich tells us roughly that 97% of the values is are going to be between 0.03 and 0.66 which is a lot more informative in my opinion than point estimates. One of the main benefits of Bayesian statistics is that we generally want to talk about the uncertainty rather than the point estimates.^[If I am understanding the whole bit of Bayesianism.] Arviz has a built in way to do this 
+
+
+
+```{python}
+az.plot_posterior(idata, point_estimate='median')
+```
+
+We can also check the region of practical equivelence. In our coin flipping case this might be some reasonable values like between 45 and 55  for all intents and purposes we have a fair coin we just don't have enough data get a mean of like 0.5. We should probably have a better justification for why we chose this region. For a model of vote share a increase of 1-3 percent could be huge! 
+
+
+```{python}
+az.plot_posterior(idata, rope = [0.45, 0.55])
+```
+
+## Gaussians
+
+Lets look at another toy example. Lets say that this is a reasonable model 
+
+$$
+\begin{aligned}
+\mu \sim Uniform(l, h) \\
+\sigma \sim \text{Half Normal}(\sigma_\sigma) \\
+Y \sim Normal(\mu, \sigma)
+\end{aligned}
+$$
+
+In our case we are using a half normal which considers the absolute values of a noraml distribution to be centered around zero. So we are forcing our sigma to be positive because well it has to be. 
+
+
+```{python}
+#| code-fold: true
+import pandas as pd 
+
+molecules = np.loadtxt('https://raw.githubusercontent.com/aloctavodia/BAP3/refs/heads/main/code/data/chemical_shifts.csv')
+
+```
+
+
+To model it we can do this 
+
+
+```{python}
+
+with pm.Model() as first_lin_model:
+    mu = pm.Uniform(name = 'mu', lower = 40, upper = 70)
+    sigma = pm.HalfNormal(name = 'sigma', sigma = 5)
+    y = pm.Normal(name = 'Y',mu = mu, sigma = sigma, observed = molecules)
+    out_lin = pm.sample(1000, nuts_sampler='nutpie')
+
+
+az.plot_trace(out_lin)
+```
+
+The diagnostic plots are looking pretty good. We can also plot the marginal distributions which I am not sure is the most informative plot for a lay audience. 
+
+
+```{python}
+
+az.plot_pair(out_lin, kind = 'kde', marginals = True)
+```
+
+We have seen that we can grab some summary statistics with `az.summary(out_lin)` but it is not the nicest looking table. However we can pass her to GT like this: 
+
+
+```{python}
+
+from great_tables import GT
+summ_stats = az.summary(out_lin, kind = 'stats').round(2)
+
+GT(summ_stats)
+
+
+```
+
+
+Which is slightly nicer than output of the `arviz` but the rownames don't transfer over which is annoying. We do need a little bit of tinkering but for the most part I don't really want to be in the table game all that often. 
+
+
+### Posterior predictive checks 
+
+
+The posterior predictive distribution is really just the distribution of future data given the model and observed data. Getting the posterior predictive is generally baked into all these Bayesian packages so we can really just do: 
+
+```{python}
+
+pm.sample_posterior_predictive(out_lin, model = first_lin_model, extend_inferencedata=True)
+
+
+```
+
+
+Then we can eyeball how good the predictions match the observed data by doing: 
+
+
+```{python}
+az.plot_ppc(out_lin, num_pp_samples=100, figsize=(12,4))
+```
+
+For a model with not greatish priors It does kind of okay. The extreme observations in the data are kind of throwing off the predictions. If we were wanted to rip this off and hope that we get more data and that the model will look better with more data we are welcome to do that. However, if this is the data we need to account for these points with a little bit more robust of a prior. 
+
+
+## Robust regression 
+
+By default with our OLS we are making an assumption about what the distribution looks like. In this case we are making the assumption that the data are normally distributed. This works a lot of the time but one of the core problems we are running into is that with a normal we are making the assumption that there are not a lot of data in the tails. 
+
+
+```{python}
+
+
+ig, ax = plt.subplots()
+ax.hist(molecules, bins=20, edgecolor='black', alpha=0.6)
+
+
+rug_height = 0.05  
+ymin, ymax = ax.get_ylim()
+rug_ymin = ymin
+rug_ymax = ymin + (ymax - ymin) * rug_height
+
+ax.vlines(molecules, rug_ymin, rug_ymax, color='black', alpha=0.7)
+
+
+
+```
+
+We see some data in the tails. We could exclude them but generally this is probably not a good idea. There is nothing really wrong with the data unless we have reasons to suspect that there were data collection errors. It is generally better practice, in Bayesianism, to make our model more robust than to throw away information. 
+
+
+### Degrees of normality 
+
+One of the nice things about stats is there are lots of problems that arise in lots of fields that people have had to deal with. One of the first one is how do we deal with deviations from the normal. Versions of the Student-T distribution arise a bit earlier than the Biometrika paper that introduces it in the English language.
+
+The history of the distribution is fun in of its self. William Sealy Gosset AKA Student was working at the Guinness Brewery working on small sample problems. You would like to assess the quality of ingredients or the quality of the beer without having to take a ton of units off the line. The more you sample the more cost you are incuring. So kind of by design the distribution can handle data in the tails. 
+
+For a Student prior we can tune it in a variety of ways but in general we are really looking to make an assumption about how much stuff is in the tails. 
+
+
+```{python}
+
+for nu in [1, 2, 10]:
+    pz.StudentT(nu, 0, 1).plot_pdf(support=(-5, 5), figsize=(12, 4))
+
+ax = pz.StudentT(np.inf, 0, 1).plot_pdf(support=(-5, 5), figsize=(12, 4), color="k")
+ax.get_lines()[-1].set_linestyle("--")
+
+
+```
+
+In general when we have smaller values than the more mass we have in the tails in the distribution. Roughly this just means that the heavier the tails are the less surprised we would be to find a point like 2 standard deviations away from the mean. 
+
+
+
+## A robust version of the normal model
+
+
+
+So we are going to rewrite the same model just with the addition of a student prior and an exponential prior. So the model looks a bit different becuase we have to constrain the weights of the tails to be strictly positive. A really common prior for the this is the exponential prior. 
+$$
+\begin{aligned}
+\mu \sim Uniform(l, h) \\
+\sigma \sim \text{Half Normal}(\sigma_\sigma) \\
+\nu \sim Exponential(\lambda) \\ 
+Y \sim \text{Student-T}(\nu, \mu, \sigma)
+\end{aligned}
+$$
+Really any prior that constrains the values of $\nu$ to be strictly positive would work. One thing that is a bit tricky about the exponential is that by default we are going to get the inverse of the mean. 
+
+
+```{python}
+
+with pm.Model() as model_t:
+    mu = pm.Uniform(name = 'mu', lower = 40, upper = 70)
+    nu = pm.Exponential('nu', 1/30)
+    sigma = pm.HalfNormal(name = 'sigma', sigma = 10)
+    y = pm.StudentT(name = 'Y',mu = mu, sigma = sigma, nu = nu, observed = molecules)
+    out_t_mod = pm.sample(1000, nuts_sampler='nutpie') 
+
+
+```
+
+The exponential part is really grafting onto the tail of distribution. We are setting the "mean" around 30 which makes it mimic a Gaussian distribution. We are not forcing the model to be a strictly Gaussian or a strictly Student-T(?) but let it fall back on the Student-T distribution when needed. We are effecitvely saying that on average we expect 30 molecule somethings, but am open to the idea that there could be some events that happen that are big but these are not likely. When we look at the posterior predictive we see that it looks much better. 
+
+
+
+```{python}
+
+pm.sample_posterior_predictive(out_t_mod, model = model_t, extend_inferencedata=True)
+
+ax = az.plot_ppc(out_t_mod, figsize=(12,4), num_pp_samples=100)
+ax.set_xlim(40,70)
+
+```
+
+
+### Misc posterior stuff 
+
+There are lot of ways to manipulate the posterior 
+```{python}
+
+posterior = out_t_mod.posterior
+
+stack = az.extract(out_t_mod)
+
+```
+
+
+We are going to play around with it more a bit later. 
+
+
+### Groups comparision 
+
+Often times we need to compare groups. Whether this is treatment and control groups, gender, or regions. One thing that really helps in a Bayesian context is to use contrast coding. In the book they use Pandas but that's never been the API of choice for me. We could to some preprocessing along these lines. 
+
+```{python}
+
+import catfact as fct
+
+tips = pl.read_csv('https://raw.githubusercontent.com/aloctavodia/BAP3/refs/heads/main/code/data/tips.csv')
+
+categories = np.array(["Thur", "Fri", "Sat", "Sun"])
+
+day_enum = pl.Enum(categories)
+
+# Cast the 'day' column to Enum and get the physical codes
+tips = tips.with_columns(
+    pl.col("day").cast(day_enum).alias("day_enum")
+)
+idx = tips["day_enum"].to_physical().to_numpy()
+tip = tips["tip"]
+
+with pm.Model() as cat_model:
+    mu = pm.Normal('mu', mu = 0, sigma = 10, shape = 4)
+    sigma = pm.HalfNormal('sigma', sigma = 10, shape = 4)
+    y = pm.Normal('y', mu = mu[idx], sigma = sigma[idx], observed= tip)
+
+```
+
+
+However, PyMc includes a coordinates and dimensions which is really just a way of saying we can feed a dicitonary with our original variable and then our flattened variable for modeling. This just has the benefit of working better when visualizing things later. 
+
+
+```{python}
+
+coords = {"days": categories, "days_flat": categories[idx]}
+
+with pm.Model(coords = coords) as comparing_groups:
+    mu = pm.HalfNormal("mu", sigma=5, dims="days")
+    sigma = pm.HalfNormal("sigma", sigma=1, dims="days")
+   
+    y = pm.Gamma("y", mu=mu[idx], sigma=sigma[idx], observed=tip, dims="days_flat") 
+    cat_data_out = pm.sample()
+    cat_data_out.extend(pm.sample_posterior_predictive(cat_data_out))     
+
+```
+
+So now when we co to plot it we can just extract it out with easy labels like this:
+
+
+```{python}
+
+_, axes = plt.subplots(2,2)
+
+az.plot_ppc(cat_data_out, num_pp_samples=100, coords = {"days_flat" : [categories]}, flatten=[], ax = axes)
+```
+
+We could use our trusty dusty Cohen's d or probability of superiority but a better way to do this is to use contrasts. 
+
+
+```{python}
+
+cat_posterior = az.extract(cat_data_out)
+
+dist = pz.Normal(0,1)
+
+comparisions = [(categories[i], categories[j]) for i in range(4) for j in range(i+1, 4)]
+
+_, axes = plt.subplots(3,2, figsize = (12,6), sharex=True)
+
+for(i,j), ax in zip(comparisions, axes.ravel()): 
+    mean_diff = cat_posterior['mu'].sel(days = i) - cat_posterior['mu'].sel(days = j)
+
+    cohen_d = (mean_diff /
+               np.sqrt((cat_posterior['sigma'].sel(days = i)**2 +
+                        cat_posterior['sigma'].sel(days = j)**2) / 2)
+    ).mean().item()
+    ps = dist.cdf(cohen_d/(2**0.5))
+    az.plot_posterior(mean_diff.values, ref_val=0, ax = ax)
+    ax.set_title(f"{i} - {j}")
+    ax.plot(0, label=f"Cohen's d = {cohen_d:.2f}\nProb sup = {ps:.2f}", alpha=0)
+    ax.legend(loc=1)
+
+```
+
+
+## Excercise 
+
+
+1. Implement the coal mining disasters model yourself 
+
+
+```{python}
+disaster_data = pl.Series(
+    [4, 5, 4, 0, 1, 4, 3, 4, 0, 6, 3, 3, 4, 0, 2, 6,
+    3, 3, 5, 4, 5, 3, 1, 4, 4, 1, 5, 5, 3, 4, 2, 5,
+    2, 2, 3, 4, 2, 1, 3, np.nan, 2, 1, 1, 1, 1, 3, 0, 0,
+    1, 0, 1, 1, 0, 0, 3, 1, 0, 3, 2, 2, 0, 1, 1, 1,
+    0, 1, 0, 1, 0, 0, 0, 2, 1, 0, 0, 0, 1, 1, 0, 2,
+    3, 3, 1, np.nan, 2, 1, 1, 1, 1, 2, 4, 2, 0, 0, 1, 4,
+    0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1], strict = False
+    
+)
+
+years = np.arange(1851, 1962)
+
+```
+
+
+The model is just a count model that looks like this 
+
+
+$$
+\begin{split}
+\begin{aligned}  
+  D_t &\sim \text{Pois}(r_t), r_t= \begin{cases}
+   e, & \text{if } t \le s \\
+   l, & \text{if } t \gt s
+   \end{cases} \\
+  s &\sim \text{Unif}(t_l, t_h)\\         
+  e &\sim \text{exp}(1)\\
+  l &\sim \text{exp}(1)    
+\end{aligned}
+\end{split}
+$$
+
+
+
+Where the model is specified as:
+- Dt: The number of disasters in year 
+- rt: The rate parameter of the Poisson distribution of disasters in year t 
+- s: The year in which the rate parameter changes (the switchpoint).
+- e: The rate parameter before the switchpoint s 
+- l The rate parameter after the switchpoint s
+- tl, th:  The lower and upper boundaries of year t 
+
+
+```{python}
+
+with pm.Model() as coal_model:
+    switchpoint = pm.DiscreteUniform('switchpoint', lower = years.min(), upper = years.max())
+    e = pm.Exponential('e', 1.0)
+    l = pm.Exponential('l', 1.0)
+    rate = pm.math.switch(switchpoint >= years, e, l)
+    dt = pm.Poisson('dt', rate, observed = disaster_data)
+    coal_mod_out = pm.sample()
+
+```

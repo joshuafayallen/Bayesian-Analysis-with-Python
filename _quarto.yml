@@ -10,7 +10,9 @@ book:
   chapters:
     - index.qmd
     - thinking-probabilistically.qmd
-    - summary.qmd
+    - Programming-Probabilistically.qmd
+    - mlm.qmd
+    - multiple-regression.qmd
     - references.qmd
 
 jupyter: python3

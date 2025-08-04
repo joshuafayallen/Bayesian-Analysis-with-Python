@@ -1,0 +1,355 @@
+# Hierarchical Models 
+
+
+These are a major workhorse in applied work because they are super flexible in a Bayesian framework and get us really interesting insights. We can integrate all kinds of levels add more and more information into our models. 
+
+
+## Sharing information, sharing priors
+
+
+One of the nice parts of MLM's are that you can share information. We can learn something about individual level coffee shops by borrowing information from a global trend and/or individual features. 
+
+
+```{python}
+#| code-fold: true
+
+import arviz as az
+import matplotlib.pyplot as plt
+import numpy as np
+import polars as pl 
+import polars.selectors as cs
+import preliz as pz
+import pymc as pm
+
+chemical_data = pl.read_csv('https://raw.githubusercontent.com/aloctavodia/BAP3/refs/heads/main/code/data/chemical_shifts_theo_exp.csv')
+
+diff = chemical_data.with_columns(
+    (pl.col('theo') - pl.col('exp')).alias('diff')
+)
+
+cat_encode  = chemical_data['aa'].cast(pl.Categorical)
+
+idx = cat_encode.to_physical().to_numpy()
+
+coords = {'aa' : cat_encode.cat.get_categories()}
+
+```
+
+
+So now lets write our no pooling model. In Pols and Economics we are effectively making a fixed intercept model where each `aa` gets its own intercept. 
+
+```{python}
+
+with pm.Model(coords = coords) as cs_nh:
+    mu = pm.Normal('mu', mu = 0, sigma = 10, dims = 'aa')
+    sigma = pm.HalfNormal('sigma', sigma = 10, dims = 'aa')
+    y = pm.Normal('y', mu = mu[idx], sigma = sigma[idx], observed=diff['diff'])
+    out_cs_nh = pm.sample()
+
+```
+
+
+With the MLM what we are going to do is let it share some information or use partial pooliing to be a bit more formal. We are going to include "hyper priors" or basically we are going to learn optimal values for our global mean and standard deviation. The model does not actually differ all that. The real difference comes from the fact that we are passing off the hyperpriors to our varying slopes and varying intercepts. 
+
+
+
+```{python}
+
+with pm.Model(coords = coords) as first_mlm:
+    # hyper priors 
+    gb_mu = pm.Normal('gb_mu', mu = 0, sigma = 10)
+    gb_sigma = pm.HalfNormal('gb_sd', 10)
+
+
+    mu = pm.Normal('mu', mu = gb_mu, sigma = gb_sigma, dims = 'aa')
+    sigma = pm.HalfNormal('sigma', sigma = 10, dims = 'aa')
+    y = pm.Normal('y', mu = mu[idx], sigma = sigma[idx], observed = diff['diff'])
+    out_first_mlm = pm.sample(nuts_sampler='nutpie')
+
+
+```
+
+One of the nice built in things in Arviz is that we can compare our model estimates using `plot_forest` 
+
+
+```{python}
+
+axes = az.plot_forest([out_cs_nh, out_first_mlm], model_names=['non-hierarchical', 'hierarichical'],
+                       var_names='mu', combined = True, r_hat = False, ess = False, figsize=(10,7))
+
+y_lims = axes[0].get_ylim()
+
+axes[0].vlines(out_first_mlm.posterior['gb_mu'].mean(), *y_lims, color = 'k', ls = ":")
+
+```
+
+One thing that its a little hard to notice right off the bat, but is kind of the point, is that in the hierarchical model the estimates are pulled closer to the "global mean" in almost every case. For the most part we do see that for the most part we aren't buying a ton of leverage for some groups, but for some groups like PRO or TYR there is an appreciable difference. 
+
+## Water Quality 
+
+Here we are just going to sim up some data. The data consists of three groups consisting of some number of samples that record the quality of the waters in each group. 
+
+
+```{python}
+N_samples = [30, 30, 30]
+G_samples = [18, 18, 18]
+group_idx = np.repeat(np.arange(len(N_samples)), N_samples)
+data = []
+for i in range(0, len(N_samples)):
+    data.extend(np.repeat([1, 0], [G_samples[i], N_samples[i]-G_samples[i]]))
+```
+
+We are going to define a beta hierarchical model that follows this form 
+
+$$
+\begin{aligned}
+\mu \sim Beta(\alpha_\mu, \beta_\mu) \\
+\nu \sim \text{Half Normal}(\sigma_\nu) \\
+\Theta_i \sim Beta(\mu, \nu) \\
+Y_i \sim Bernoulli(\theta_i)
+\end{aligned}
+$$
+
+
+
+Now to express it as a mode we are going to rexpress it like this 
+
+
+```{python}
+
+with pm.Model() as beta_hm:
+    # pretty symmetric
+    mu = pm.Beta('mu', 1.0, 1.0)
+    nu = pm.HalfNormal('nu', 10)
+    theta = pm.Beta('theta', mu = mu, nu = nu, shape = len(N_samples))
+    y = pm.Bernoulli('y',theta[group_idx], observed = data)
+    out_beta_hm = pm.sample(nuts_sampler='nutpie')
+
+```
+
+Now lets take a look at her 
+
+
+
+```{python}
+az.plot_trace(out_beta_hm)
+
+```
+
+We are being implored to change up the model to set the g samples to switch up the number of samples
+
+
+```{python}
+
+g_samp18 =  az.summary(out_beta_hm, kind = 'stats')
+
+
+N_samples = [30, 30, 30]
+G_samples = [13, 13, 13]
+group_idx = np.repeat(np.arange(len(N_samples)), N_samples)
+data13 = []
+for i in range(0, len(N_samples)):
+    data13.extend(np.repeat([1, 0], [G_samples[i], N_samples[i]-G_samples[i]]))
+
+
+with pm.Model() as pm_mod13: 
+    mu = pm.Beta('mu', 1.0, 1.0)
+    nu = pm.HalfNormal('nu', sigma = 10)
+    theta = pm.Beta('theta', mu = mu, nu = nu, shape = len(N_samples))
+    y = pm.Bernoulli('y', theta[group_idx], observed = data13)
+    out_beta_13 = pm.sample(nuts_sampler='nutpie')
+
+gsamp13 = az.summary(out_beta_13, kind = 'stats')
+
+
+N_samples = [30, 30, 30]
+G_samples = [18, 3, 3]
+group_idx = np.repeat(np.arange(len(N_samples)), N_samples)
+data_mix = []
+for i in range(0, len(N_samples)):
+    data_mix.extend(np.repeat([1, 0], [G_samples[i], N_samples[i]-G_samples[i]]))
+
+with pm.Model() as pm_mix_samp:
+    mu = pm.Beta('mu', 1.0, 1.0)
+    nu = pm.HalfNormal('nu', 10)
+    theta = pm.Beta('theta', mu = mu, nu = nu, shape = len(N_samples))
+    y = pm.Bernoulli('y', theta[group_idx], observed = data_mix)
+    out_mixed = pm.sample(nuts_sampler='nutpie')
+
+sum_stats_mix = az.summary(out_mixed, kind = 'stats')
+
+sum_stats_mix
+
+```
+
+If we look at the theta values for each value of the index in the mixed sample models we get some wonky results. Theta1 and Theta2 are the same because we made it that way. It is a bit hard to tell what is going on but if we plot the data we can see that theta0 is being brough closer to the global mean that it otherwise probably would have. 
+
+```{python}
+az.plot_forest(data = out_mixed, var_names=['mu', 'theta'])
+
+```
+
+
+Why would we want this, shouldn't the data speak for itself? In some respects yes and no. The primary benefit is that while we are maybe underestimating the effects of theta0 the shrinkage provides some robustness when modeling groups. While we may miss the target it will generally be shrunk transparently towards the global mean. This provides some of the same benefits as using something like a Student-T distribution. 
+
+## A Soccer example 
+
+The modeling problem is that we are trying to model success rate. One of the key parts of the metric is the rate part. We are modeling productivity as a function of their shot attempts. We wouldn't expect that a goalie is going to have the same success rate as Messi. But, critically they could have 100% success rate if they have 1 shot attempt and one goal. We could actually hand do the success rate ourselves. But, this may be less transparent as well as the fact that we are trying to be as lazy as possible. 
+
+In `brms` we are used to doing this as `brms::brm(outcome | trials(1))` we are going to use a similar mechanism but instead of the formula syntax you are familiar with we are just passing it to a named argument. So the model is going to look like this 
+
+
+$$
+\begin{aligned}
+\text{Hyper Priors}\\
+\mu \sim Beta(1.7, 5,8) \\
+\nu \sim Gamma(125, 50) \\
+\text{Intercept Priors} \\
+\mu_{p} \sim Beta(\mu, \nu ) \\
+\sigma_{p} \sim Gamma(125, 50) \\
+\Theta \sim Beta(\mu_p, \sigma_p) \\
+Y \sim Binomial(n_i,\Theta)
+  
+\end{aligned}
+$$
+
+
+So now when we model this it will look like 
+
+```{python}
+
+soccer = pl.read_csv('https://raw.githubusercontent.com/aloctavodia/BAP3/refs/heads/main/code/data/football_players.csv', schema_overrides={'position': pl.Categorical})
+
+pos_idx = soccer['position'].to_physical().to_numpy()
+pos_codes = soccer['position'].cat.get_categories().to_numpy()
+
+n_pos = len(pos_codes)
+n_players = soccer.height
+
+coords = {'pos': pos_codes}
+
+
+with pm.Model(coords = coords) as soccer_mod: 
+    mu = pm.Beta('mu', 1.7, 5.8)
+    nu = pm.Gamma('nu', mu = 125, sigma = 50)
+    mu_p = pm.Beta('mu_p', mu = mu, nu = nu, dims = 'pos')
+    nu_p = pm.Gamma('nu_p', mu = 125, sigma = 50, dims = 'pos')
+    theta = pm.Beta('theta', mu = mu_p[pos_idx], nu = nu_p[pos_idx])
+    y = pm.Binomial('gs', n = soccer['shots'].to_numpy(), p = theta, observed = soccer['goals'].to_numpy())
+    out_soccer = pm.sample(draws=3000, target_accept=0.95, random_seed=4591, nuts_sampler='nutpie')
+
+```
+
+Now lets compare her to the book 
+
+```{python}
+_, ax = plt.subplots(3, 1, figsize=(12, 6), sharex=True)
+az.plot_posterior(out_soccer, var_names='mu', ax=ax[0])
+ax[0].set_title(r"Global mean")
+az.plot_posterior(out_soccer.posterior.sel(pos="FW"), var_names='mu_p', ax=ax[1])
+ax[1].set_title(r"Forward position mean")
+az.plot_posterior(out_soccer.posterior.sel(theta_dim_0=1457), var_names='theta', ax=ax[2])
+ax[2].set_title(r"Messi mean")
+
+```
+
+
+## Excericises 
+
+
+1. Using your own words explain the difference between partial pooling, complete pooling, and no pooling.
+
+We can really just think of them as how much information we are sharing across groups. In a no pooling model we are, in effect, modeling each individual unit with only its own information. So if we are modeling vote share for the U.S we are modeling vote share as a function of state level economic factors, state level demographics, and then state level unobserved time invariant factors. This is kind of your typical fixed effect model you would specify in Econ or Political Science. We are impliciltly making the assumption that CA and GA don't really tell us that much about each other. Which is probably not an unfair assumption but we are throwing some information away that could make our modeling more robust. While somewhere like CA and GA probably don't have a ton in common we would get some useful cross-sectional information from nearby southern states and/or county level information between Fulton and the San Francisco county. 
+
+Complete pooling is really just the idea that we are going to toss everything into a jar. We are making the assumption that the individuality of each unit does not contribute much to our understanding. In general I don't think in Political science we model things like this because well most of the time individual units have quirks. Tbh honest I don't really thing any field models anything with complete pooling. The reason this is because we are kind of saying that these things are interchangeable. In reality nothing really there are not a lot of instances where we are modeling something where cross-sectional information tells us nothing. 
+
+Partial pooling is a compromise between the two approaches. We are not saying that all these are interchangeable, but we are saying that something we learn about say the Baltimore Ravens can tell us something about other good teams. However, we are also acknowledging that there are certain things about the Baltimore Ravens that are unique to the team. Not every team has Lamar Jackson and Derrick Henry which present different running threats that opposing defenses has to respect. This changes what other teams' defense have to do because they still have deal with a Lamar scramble, while also accounting for his threat as a passer. This is different than say the Texans or the Lions where Goff and Stroud are less dynamic scramblers, but also play on good offenses. 
+
+
+3. Create a Hierarchical version of the tips model in Chapter 2
+
+The original model looks like this 
+
+$$
+\begin{aligned}
+\mu \sim Normal(0, 10)\\
+\sigma \sim HalfNormal(10, 4) \\ 
+y \sim Normal(\mu, \sigma)
+
+\end{aligned}
+$$
+
+
+So the hierarchical model looks something to this effect.  
+
+$$
+\begin{aligned}
+\mu_g \sim Gamma(5, 2) \\
+\sigma_g \sim Gamma(2, 1.5) \\ 
+\mu \sim Normal(mu, sigma) \\ 
+\sigma =  HalfNormal(1) \\
+y \sim (mu_p, sigma_p)
+
+\end{aligned}
+
+$$
+
+Or something to this effect. One thing that actually became really clear to me in the excercise is that the hyperpriors that we are tuning for the group specific effects are going to be propigated through the global mean generally. Whereas the global uncertainty is something that we are going to have to tune ourselves.  
+
+
+$$
+\begin{aligned}
+\mu_{groups} \sim Gamma(mu = 5 , sigma = 2) \\
+\mu \sim HalfNormal(\sigma = \mu{groups}) \\
+\sigma \sim HalfNormal(sigma = 1) \\
+y \sim (\mu, \sigma)
+
+\end{aligned}
+
+$$
+
+So the models will then just be 
+
+```{python}
+#| code-fold: true
+tips = pl.read_csv('https://raw.githubusercontent.com/aloctavodia/BAP3/refs/heads/main/code/data/tips.csv')
+
+categories = np.array(["Thur", "Fri", "Sat", "Sun"])
+
+day_enum = pl.Enum(categories)
+
+# Cast the 'day' column to Enum and get the physical codes
+tips = tips.with_columns(
+    pl.col("day").cast(day_enum).alias("day_enum")
+)
+idx = tips["day_enum"].to_physical().to_numpy()
+tip = tips["tip"]
+
+
+coords = {'days': categories, 'days_flat': categories[idx]}
+
+```
+
+
+```{python}
+
+with pm.Model(coords = coords) as just_mean_hp:
+    mu_g = pm.Gamma('mu_g', mu = 5 , sigma = 2)
+    mu = pm.HalfNormal('mu', sigma = mu_g, dims = 'days')
+    sigma = pm.HalfNormal('sigma', sigma = 1, dims ='days')
+    y = pm.Gamma('y', mu = mu[idx], sigma = sigma[idx], observed = tip, dims = 'days_flat')
+    out_just_mean_hp = pm.sample(1000, nuts_sampler='nutpie')
+
+with pm.Model(coords = coords) as all_hyper_priors: 
+    mu_g = pm.Gamma('mu_group', 5, 2)
+    sigma_g = pm.Gamma('sigma_group',2, 1.5)
+    mu = pm.Normal('mu', mu_g, sigma_g, dims = 'days')
+    sigma = pm.HalfNormal('sigma', 1, dims = 'days')
+    y = pm.Gamma('y', mu = mu[idx], sigma = sigma[idx], observed=tip, dims = 'days_flat')
+    out_all_hyper_priors= pm.sample(1000, nuts_sampler='nutpie')
+
+az.plot_forest([out_just_mean_hp, out_all_hyper_priors], model_names=['Just Mu Tuned', 'Both Mu and Sigma Tuned'], var_names='mu', combined=True, r_hat=False, ess=False, figsize=(12, 3))
+
+
+
+```

@@ -1,0 +1,54 @@
+# GLM's and Multiple Regression
+
+```{python}
+#| code-fold: true
+import arviz as az
+import matplotlib.pyplot as plt
+import numpy as np
+import polars as pl 
+import polars.selectors as cs
+import preliz as pz
+import pymc as pm
+
+
+```
+For the most part we have really just been working in simple simple land. We have only been passing off models that look a bit like 
+
+$$
+Y = \beta_1 \times var + \varepsilon
+$$
+
+Some more astute users or just casual viewers may have noticed that we are not specifying a model with an intercept. Which is fine for some things probably not ideal for others! So the big thing about this chapter for me is really just building a simple model with more moving parts into the likelihood and then getting real funky with the likelihood. 
+
+
+## OLS 
+
+
+```{python}
+
+bikes = pl.read_csv('https://raw.githubusercontent.com/aloctavodia/BAP3/refs/heads/main/code/data/bikes.csv')
+
+```
+
+So the model is going to look pretty similar just with a little bit of a remix. So $\sigma$ looks the same, for the most part, while the mu changes a bit because you have to tell PyMC what is being multiplied to get the mean of the whatever. So if we are specifying a model of bike rentals with temperature as one of our predictors as in the book. The model would look like this when we write it out mathily. 
+
+$$
+\begin{aligned}
+\alpha \sim Normal(0, 100) \\
+\beta \sim Normal(0, 100) \\
+\sigma \sim Half Cauchy(10) \\
+y \sim Normal(mu, sigma)
+\end{aligned}
+$$
+
+In PyMC there is one additional step to get the correct mu, 
+
+
+```{python}
+with pm.Model() as model_ols:
+    alpha = pm.Normal('alpha', 0, 100)
+    beta = pm.Normal('beta', 0, 100)
+    sigma = pm.HalfCauchy('sigma', 10)
+
+
+```
