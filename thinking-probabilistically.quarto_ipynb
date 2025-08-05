@@ -1,0 +1,449 @@
+{
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "# Thinking Probabilistically "
+      ],
+      "id": "5f6e5797"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| echo: false\n",
+        "import polars as pl \n",
+        "import polars.selectors as cs\n",
+        "from scipy.special import binom, beta\n",
+        "import preliz as pz\n",
+        "from great_tables import GT "
+      ],
+      "id": "071a65df",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## A Probability Primer for Bayesian Practitioners \n",
+        "\n",
+        "###  Sample space and events \n",
+        "\n",
+        "Lets say we go out and ask 3 random respondents a series of three questions and record their answers. There are lots of ways we could represent. In @tbl-samp-space I remix the example in the book a bit but the core idea is the same. The *sample space* is the set of all possible outcomes. "
+      ],
+      "id": "0c0d82cb"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| echo: false\n",
+        "#| label: tbl-samp-space\n",
+        "sample_space = pl.DataFrame({\n",
+        "    'Person 1': ['yes', 'yes', 'yes'],\n",
+        "    'Person 2': ['no', 'no', 'no'],\n",
+        "    'Question': ['1', '2', '3']\n",
+        "}).unpivot(on = cs.contains('Person'), index = 'Question', variable_name='Individual', value_name='Response')\n",
+        "\n",
+        "GT(sample_space)"
+      ],
+      "id": "tbl-samp-space",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "In our case, we are just talking about the order of each person's responses. An event is a subset of the feature space, so we can think of it as the order in which people respond to the questions. So there are eight possible *combinations* of answer orders. For brevity, I only include two of those events. If we wanted to know how likely it is that we observe an event, we can express it as a simple proportion. \n",
+        "\n",
+        "$$\n",
+        "P(Event) = \\frac{\\text{event we are interested in}}{\\text{total number of events}}\n",
+        "$$\n",
+        "\n",
+        "So if we are interested in the all yes event, it is just `{python} 1/8`. If we make the assumption that the events are independent of each other then the probability of observing an event where the respondent answers all yes and another respondent answers all no than we can represent that as:\n",
+        "\n",
+        "$$\n",
+        "P(\\text{All Yes and No}) = \\frac{1}{8} + \\frac{1}{8} = \\frac{2}{8} = 0.25\n",
+        "$$\n",
+        "\n",
+        "\n",
+        "Fast forward a bit the three axioms of probability are: \n",
+        "\n",
+        "1. The probability of an event is an even is a non-negative real number \n",
+        "2. The probability of P(sample space) = 1\n",
+        "3. If 𝐴1, 𝐴2,… are disjoint events, meaning they cannot occur simultaneously then\n",
+        "𝑃(𝐴1, 𝐴2, …) = 𝑃(𝐴1) + 𝑃(𝐴2) + …\n",
+        "\n",
+        "### Random Variables \n",
+        "\n",
+        "\n",
+        "A random variable is effectively a function that maps the sample space the real numbers. So we can think of that as. Doing something akin to: \n"
+      ],
+      "id": "dd554888"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| echo: false\n",
+        "ex = sample_space.with_columns(\n",
+        "    pl.when(pl.col('Response') == 'yes').then(1).otherwise(0).alias('Mapping Examp')\n",
+        ")\n",
+        "\n",
+        "GT(ex)"
+      ],
+      "id": "217dc70b",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "The author uses the example of a set of Python code. So if the take example from `pl.when(thing_happens).then(do this).otherwise(do that)` this is an abstraction over a set of Rust code that takes our inputs and then maps them to our desired output. We could theoretically write out all this Rust code every single time. But we package it in a nice set of functions to make the end user's code cleaner and reusable we make some functions to do this. \n",
+        "\n",
+        "Random variables play this similar role in stats where we have some inputs like responses to a survey or temperature that get mapped onto some process. There is no randomness when moving from \"yes\" to \"one\", but there *is* some randomness when we go to the survey the third and fourth person to get their event. \n",
+        "\n",
+        "### Discrete random variables and their distributions\n",
+        "\n",
+        "We generally don't care about the kidns of problems that get presented in these refreshers. The probability of 3 inidividuals answering all yes or the probability of getting a one on the dice. In general we are more intersted in getting a list of probabilities for all possible answers. We can then get the possibilities of any sort of event we would care about. As a simple heuristic the list of the probabilities are effectively just this list of probabilities. So if we wanted to get the proportion of heads of 1000 flipped coins we could do this. "
+      ],
+      "id": "a048fe93"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| label: fig-coin-flips\n",
+        "#| echo: false\n",
+        "import numpy as np \n",
+        "import matplotlib.pyplot as plt \n",
+        "\n",
+        "flips = np.random.choice(['heads', 'tails'], size = 1000, replace = True)\n",
+        "\n",
+        "coin_flips = pl.DataFrame({\n",
+        "    'heads_proportion': np.cumsum(flips == 'heads')/np.arange(1, 1000 + 1),\n",
+        "    'flip_number': np.arange(1, 1000 + 1)\n",
+        "})\n",
+        "\n",
+        "plt.figure(figsize=(10,6))\n",
+        "plt.hist(coin_flips['heads_proportion'])\n"
+      ],
+      "id": "fig-coin-flips",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "In this case the probability distribution of a coin flip is a Bernouli distribution. When we have multiple Bernouli trials we can stack them and make a binomial. One thing about these functions is that they have, for lack of a better term, shape parameters. For a normal those are our mean and standard deviation for something like the beta binomial in `rbinom()` it is `rbinom(shape1 = 2, shape2 = 9)` which changes where the most likely outcomes are. \n"
+      ],
+      "id": "bc5f562c"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| code-fold: true\n",
+        "\n",
+        "np.random.seed(1994)\n",
+        "\n",
+        "from cycler import cycler\n",
+        "default_cycler = cycler(color=[\"#000000\", \"#6a6a6a\", \"#bebebe\", \"#2a2eec\"])\n",
+        "\n",
+        "plt.rc('axes', prop_cycle=default_cycler)\n",
+        "plt.rc('figure', dpi=600)\n",
+        "\n",
+        "n = 5\n",
+        "\n",
+        "x = np.arange(0,5)\n",
+        "fig, axes = plt.subplots(2,2, figsize = (10,6), sharey= True, sharex = True)\n",
+        "axes = np.ravel(axes)\n",
+        "\n",
+        "\n",
+        "for ax, (alpha, bt) in zip(axes, ((1,1), (6,4),(4,6), (20,20))):\n",
+        "    dist_pmf = binom(n, x) * (beta(x+alpha, n-x+bt) / beta(alpha, bt))\n",
+        "    ax.vlines(x, 0, dist_pmf, colors = 'C0', lw=4)\n",
+        "    ax.set_title(f\"α={alpha}, β={bt}\")\n",
+        "    ax.set_xticks(x)\n",
+        "    ax.set_xticklabels(x + 1)\n",
+        "\n",
+        "fig.text(0.52, -0.04, \"x\", fontsize=18)\n",
+        "fig.text(-0.04, 0.4, \"P(X=x)\", fontsize=18, rotation=\"vertical\")"
+      ],
+      "id": "b5ebbeb8",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "While this is helpful for us as we are toying around with setting priors or as pedagogy. The thing that is doing the heavy lifting of mapping things to the like P(thing) = 0.6 is the *probability mass function*. This works for discrete data because you can't have 1.5 heads. I eschew including it but one really helpful thing to help us wrap our heads around what changing the shape parameters of our distribution are is using the interactive plots. \n"
+      ],
+      "id": "f52c84b2"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "out.width": "20%"
+      },
+      "source": [
+        "bb = pz.BetaBinomial(alpha = 10, beta = 10, n = 6)\n",
+        "\n",
+        "bb.plot_interactive(figsize = (10,6), pointinterval=False, xy_lim =(20,20))\n"
+      ],
+      "id": "5da1fb35",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "### Continous random variables and their distributions \n",
+        "\n",
+        "Continous values are a bit different. They, theoretically, can go go from $-\\infty$ to $\\infty$ so the mapping has to work a little bit differently. Instead of a probalility mass function where we are moving from heads to 1 we have to effectively create *bins* and we count how many values fall in each bin. If we take a simple example of going from -1 to 1 we can get a huge number of points. So the actual probablity of getting exactly one in this context is `{python} 1/100` making it somewhat useless to do probablility like this. Hence why we take this density approach. \n",
+        "\n",
+        "\n",
+        "### Cumulative distribution function\n",
+        "\n",
+        "Finally we have the CDF to characterize distributions. The CDF of a random variable is kind of just the idea that we can take the mappings of a PMF or a PDF and then just map them onto a fairly simple question. What is the probability we get a point as big or less than the point we drew from that distribution. \n",
+        "\n",
+        "### Conditional Probablities \n",
+        "\n",
+        "From the highest level of abstraction all our models are really just fancy conditional probability machines. Given an outcome variable how does it change if we observe these 1 to a million things. To keep it more manageable than lets just consider the bivariate case. If we are trying to understand how something about how good an NFL team is we might want to look at their EPA and condition on adjusted games lost. The more games that a team's best players lose the worse their EPA is going to be. By knowing something about EPA we know a little bit something about their \n",
+        "\n",
+        "We would anticipate that the higher a team's EPA is the less adjusted games lost they have. If we plot the marginal distributions we can see that. Quickly to compute the marginal distribution of AGL we are going to take the p(AGL, EPA) and then we average over EPA. In @fig-marginals we can see that a bit more clearly. The dashed lines are the conditional probabilities when we sample from the p(AGL, EPA).\n"
+      ],
+      "id": "a2f5c82c"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| label: fig-marginals\n",
+        "#| code-fold: true\n",
+        "\n",
+        "# take steps of 0.1 from -4 to 4 effectively just seq(-4, 4, by = 0.1)\n",
+        "x, y = np.mgrid[-4:4:.01, -4:4:.01]\n",
+        "pos = np.empty(x.shape + (2,))\n",
+        "pos[:, :, 0] = x; pos[:, :, 1] = y\n",
+        "\n",
+        "## fill the empty 3d array \n",
+        "pos[:, :, 0] = x; pos[:, :, 1] = y\n",
+        "\n",
+        "## initialize a multivariate normal \n",
+        "\n",
+        "rv = pz.MvNormal([0, 0], [[1, 0.8], \n",
+        "                          [0.8, 1]])\n",
+        "\n",
+        "\n",
+        "x_value = pos[:, :, 0][:,0]\n",
+        "x_density = rv.pdf(pos)\n",
+        "\n",
+        "left, width = 0.1, 0.65\n",
+        "bottom, height = 0.1, 0.65\n",
+        "bottom_h = left_h = left + width + 0.02\n",
+        "\n",
+        "rect_scatter = [left, bottom, width, height]\n",
+        "rect_histx = [left, bottom_h, width, 0.2]\n",
+        "rect_histy = [left_h, bottom, 0.2, height]\n",
+        "\n",
+        "# this is effectively making small multiples\n",
+        "# that we then place in the positions defined above \n",
+        "_, axes_arr = plt.subplots(1, 3, figsize=(8, 8))\n",
+        "\n",
+        "ax_joint, ax_x, ax_y = axes_arr\n",
+        "ax_joint.set_position(rect_scatter)\n",
+        "ax_x.set_position(rect_histx)\n",
+        "ax_y.set_position(rect_histy)\n",
+        "\n",
+        "ax_joint.imshow(x_density, cmap='cet_gray_r', origin='lower', extent=[-3, 3, -3, 3])\n",
+        "\n",
+        "# these are effectively arbitrary as long as they are within the grid\n",
+        "ax_joint.plot(x_value, x_density[400]*2, 'k:', lw=2)\n",
+        "ax_joint.plot(x_value, x_density[500]*2+1, 'k:', lw=2)\n",
+        "ax_joint.plot(x_value, x_density[300]*2-1, 'k:', lw=2)\n",
+        "\n",
+        "\n",
+        "ax_x.fill_between(x_value, x_density.sum(1), color = 'C2')\n",
+        "ax_y.fill_between(x_value, x_density.sum(1), color = 'C2')\n",
+        "\n",
+        "for ax in [ax_joint, ax_x, ax_y]:\n",
+        "    ax.grid(False)\n",
+        "    ax.set_facecolor('w')\n",
+        "    ax.set_xticks([])\n",
+        "    ax.set_yticks([])\n",
+        "ax_joint.set_xlim(-3, 3)\n",
+        "ax_joint.set_ylim(-3, 3)\n",
+        "ax_x.set_xlim(-3, 3)\n",
+        "ax_y.set_ylim(-3, 3)\n",
+        "ax_x.set_xlim(-3, 3)\n",
+        "ax_joint.set_ylabel('$B$', rotation=0, labelpad=20, fontsize=18)\n",
+        "ax_joint.set_xlabel('$A$', fontsize=18)\n",
+        "\n",
+        "ax_joint.text(-2.5, 2.5, '$p(EPA, AGL)$', fontsize=18, color='k', weight='medium')\n",
+        "ax_y.text(10, 0, '$p(GPL)$', fontsize=18, color='k', weight='medium')\n",
+        "ax_x.text(-0.2, 15, '$p(EPA)$', fontsize=18, color='k', weight='medium')\n",
+        "ax_joint.text(1, -2, ' ... $p(EPA \\mid AGL)$', fontsize=18, color='k', weight='medium')"
+      ],
+      "id": "fig-marginals",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "### Expected Values \n",
+        "\n",
+        "Lets say that we have a discrete random variable **X**. We can compute its expected value as: \n",
+        "\n",
+        "$$\n",
+        "E(X) = \\Sigma_{x} xP(X=x)\n",
+        "$$\n",
+        "\n",
+        "Which is just another way of expressing the average. This is one version of an expected value. Instead of doing the usual hand calculating of a mean. The variance is also another form of an expected value. Sometimes we refer to these as the moment of a distribution. In a Gaussian distribution we also have something called kurtosis which tells us how much stuff is in the tails of the distribution. We also has skewness which shifts where the masses are so we could do something like this. \n"
+      ],
+      "id": "dd38999e"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "_, ax = plt.subplots(2,2, figsize = (12,6), sharex=True)\n",
+        "\n",
+        "pz.Normal(0, 1).plot_pdf(ax=ax[0, 0], moments=[\"m\", \"d\", \"s\", \"k\"], legend=\"title\")\n",
+        "pz.BetaScaled(1.1, 1.1, -4, 4).plot_pdf(ax=ax[0, 1], moments=[\"m\", \"d\", \"s\", \"k\"], legend=\"title\")\n",
+        "pz.SkewNormal(0, 1, 3).plot_pdf(ax=ax[1, 0], moments=[\"m\", \"d\", \"s\", \"k\"], legend=\"title\")\n",
+        "pz.StudentT(3, 0, 1).plot_pdf(ax=ax[1, 1], moments=[\"m\", \"d\", \"s\", \"k\"], legend=\"title\", support=(-7, 7))"
+      ],
+      "id": "4b285627",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## Bayes Theorum \n",
+        "\n",
+        "Lets fastforward a bit so we can express Bayes' rule as \n",
+        "\n",
+        "$$\n",
+        "\\overbrace{p(hypothesis | data)}^{Posterior} = \\frac{\\overbrace{p(data | hypothesis)}^{likelihood}\\overbrace{p(hypothesis)}^{prior}}{\\underbrace{P(data)}_{marginal likelihood}}\n",
+        "$$\n",
+        "\n",
+        "\n",
+        "- **Prior**: The prior is a reflection of what we know about the hypothesis prior to ever seeing the data. There are a lot of ways to think of priors which is always something that is a bit difficult to wrangle our head around. In a machine learning framework we could think of a prior as a form of regularization. We don't actually think every value from 0-1 are equally likely in a model of EPA. If we draw a QB from a Beta distribution it is unlikely that we are going to draw a QB has an EPA of 0.9.^[For reference the EPA/Play leader in 2024 was Jared Goff with 0.29 and the leader in 2023 was Brock Purdy with 0.338/] From a classical statistical perspective we can really just think of the prior as a more apparent assumption we are making. \n",
+        "\n",
+        "- **Likelihood**: The likelihood is the way we introduce data to our analysis. So in the model it is really just \"what is the probability of the data conditional on the hypothesis\". So in an OLS the likelihood is just the normal pdf. \n",
+        "\n",
+        "- **Posterior**: The posterior practically is just the product of the likelihood and the prior. So to put this a bit more concretly: it is the probability of the data conditional on the hypothesis multiplied by what believe before seeing the data. This is itself a probability distribution. A conjugate prior of a likelihood is a prior that, when used in combination with a given likelihood, returns a posterior with the same functional form as the prior\n",
+        "\n",
+        "## Single Parameter inference\n",
+        "\n",
+        "### The Coin-flipping problem \n",
+        "\n",
+        "Lets say we are not the biggest joy to have at parties. We corner some unlucky party goers and we want to know if the quarter is fair coin. This could be important if we want to model the bias of a coin especially if we are like trying to figure out how to game the coin flip for a game or something. Really this is just a pedagocial example so no need to dwell on it that much. \n",
+        "\n",
+        "### Choosing A likelihood \n",
+        "\n",
+        "If we assume that these trials are independent. Meaning if its just me and a friend flipping coins we find in the street we can assume that these are independent. For this we can safely use the Binomial likelihood. To make this a little more concrete lets write out the likelihood with our toy example \n",
+        "\n",
+        "$$\n",
+        "p(\\text{getting heads} | \\Theta) = \\frac{\\text{Number of Tosses}!}{\\text{getting heads}!(Tosses - \\text{getting heads})!}\\Theta^{\\text{Getting Heads}} (1 - \\Theta)^{\\text{Tosses - \\text{Getting Heads}}}\n",
+        "$$\n"
+      ],
+      "id": "a9ea256e"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "n_trials = [1,2, 5]\n",
+        "getting_heads = [0.25, .5, 0.75]\n",
+        "\n",
+        "\n",
+        "_,axes = plt.subplots(3,3, figsize = (12,6), sharex = True, sharey = True)\n",
+        "for i, n in enumerate(n_trials):\n",
+        "    for j, p in enumerate(getting_heads):\n",
+        "        pz.Binomial(n, p).plot_pdf(legend = 'title', ax = axes[i, j])\n"
+      ],
+      "id": "e0de2b1b",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "When we look at the plots as the number of trials grow we get more or less a probability of approx 50/50. When we change the probability to 0.5 and a t one trial it fits our mental model fairly well. While this is not always feasible it definitely helps. \n",
+        "\n",
+        "### Choosing a prior \n",
+        "\n",
+        "A natural choice for our prior is the the beta distrbitution. It is bounded between 0 and 1 which helps in our coin flip problem but is especially helpful for proportions. We would have to play with our shape parameters a bit but. A mostly symetric shape around .5 makes the most sense a priori. We are not going to entirely rule out a biased coin in any direction but we feel pretty confident that over like 20 trials the proportion of heads is going to be closer to .5 than it is 1 or 0. The big benefit computationally is that the Beta distribution and the binomial are that it returns a posterior that is the same functional form of the prior making it easier to explore the posterior. This was a much bigger deal in olden times.^[By olden times we are really talking closer to like your childhood.]\n",
+        "\n",
+        "### How to choose priors \n",
+        "\n",
+        "As a Bayesian we do want the data to speak for itself. But we don't have to pretend like we don't know anything about the data. We really want to shoot for weakly informative priors. We know that a player or an offense generating close to 1 EPA/play is next to impossible in the NFL. Like it could theoretically happen but that would likely require us to take a top 5 offense in the NFL in the past 5-10 years and transport it back to when players were moonlighting in the offseason. However, we are probably not likely to see that or would not be a fun excercise to undertake. Instead we can impose some weakly informative priors to encourage our models to explore a reasonable set of bounds of the posterior distribution. \n",
+        "\n",
+        "\n",
+        "One helpful way we can start to do prior tuning is using `preliz`. In some respects we could theoretically just hand derive it but that is not a good use of our time. In the plot below we are just saying 90% of values should be between 0.1 and 0.7. This will then spit out the priors in the legend. We can then take this prior and feed it over to our modeling packages which is super nice. Since sometimes hand deriving logit priors and beta priors is supertedious. \n"
+      ],
+      "id": "217fd62b"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "dist = pz.Beta()\n",
+        "\n",
+        "pz.maxent(dist, 0.1, 0.7, 0.9)\n",
+        "\n",
+        "\n",
+        "pz.Beta(alpha = 2.47, beta = 3.61).to_pymc()"
+      ],
+      "id": "6e3acb06",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## Excercises \n",
+        "\n",
+        "These will be a bit briefer than the ones in the book. \n",
+        "\n",
+        "3. Use PreliZ to explore different parameters for the BetaBinomial and Gaussian distribution. \n"
+      ],
+      "id": "b1c9242b"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "# _, ax = plt.subplots(2,2, figsize = (12,6), sharex  )"
+      ],
+      "id": "bfe93eca",
+      "execution_count": null,
+      "outputs": []
+    }
+  ],
+  "metadata": {
+    "kernelspec": {
+      "name": "python3",
+      "language": "python",
+      "display_name": "Python 3 (ipykernel)",
+      "path": "/Users/josh/Library/CloudStorage/Dropbox/learning-bayes/bayesian-analysis-with-python/.venv/share/jupyter/kernels/python3"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 5
+}

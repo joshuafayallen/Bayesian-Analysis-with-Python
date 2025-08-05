@@ -1,0 +1,683 @@
+{
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "# Programming Probabilistically\n",
+        "\n",
+        "Last chapter was kind of a primer that is worth going over from time to time. But the nuts and bolts of why you spent the 30ish dolars is to learn PyMc and how to do Bayesian modeling in Python. \n",
+        "\n",
+        "## Flipping coins with PyMC\n",
+        "\n",
+        "Lets repeat the coin flipping problem in PyMC in our case we can set a real value for $\\Theta$ and creatively name it theta real. "
+      ],
+      "id": "b37b88e3"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "import arviz as az\n",
+        "import matplotlib.pyplot as plt\n",
+        "import numpy as np\n",
+        "import polars as pl \n",
+        "import polars.selectors as cs\n",
+        "import preliz as pz\n",
+        "import pymc as pm\n",
+        "\n",
+        "np.random.seed(1994)\n",
+        "\n",
+        "theta_real = 0.35\n",
+        "\n",
+        "trials = 4\n",
+        "\n",
+        "data = pz.Binomial(n = 1, p = theta_real).rvs(trials)\n"
+      ],
+      "id": "dfac9acf",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "No we have a mode lets go and define as \n",
+        "\n",
+        "$$\n",
+        "\\begin{aligned}\n",
+        "\\Theta \\sim Beta(\\alpha = 1, \\beta = 1) \\\\\n",
+        "Y \\sim Binomial (n = 1, p = \\Theta)\n",
+        "\n",
+        "\\end{aligned}\n",
+        "$$\n",
+        "\n",
+        "What is fun about PyMC is that we specify the model in a broadly similar way to Stan. So this model becomes "
+      ],
+      "id": "cfefce1b"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "with pm.Model() as our_first_mod:\n",
+        "    theta = pm.Beta('theta', alpha = 1., beta = 1.)\n",
+        "    y = pm.Bernoulli('y', p = theta, observed = data)\n",
+        "    idata = pm.sample(1000, nuts_sampler='nutpie')\n"
+      ],
+      "id": "2a8f4e3b",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## Summarzing the Posterior \n",
+        "\n",
+        "There are some built in methods to summarize the data and check the health of our chains. \n"
+      ],
+      "id": "591f6b52"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "az.plot_trace(idata)"
+      ],
+      "id": "44904340",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "She looks pretty good nothing like sticks out all that much. I am probably going to be a little more partial to the ggdist. One of the nice things is that we can extract the data like this.\n"
+      ],
+      "id": "f1cf0eda"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "out = pl.from_pandas(idata.to_dataframe())\n",
+        "\n",
+        "out.write_parquet(\"data/first_mod_samps.parquet\")"
+      ],
+      "id": "ec4c821f",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "Then we can then go ahead and load and summarize her like this. This is likely just going to be more helpful if I want to make really specific plots with ggplot than using using arviz. This is nothing personal against arviz I just have more experience in ggplot. \n",
+        "\n",
+        "```\n",
+        "library(arrow)\n",
+        "library(ggdist)\n",
+        "library(tidyverse)\n",
+        "\n",
+        "first_mod = read_parquet(here::here('data', 'first_mod_samps.parquet')) |>\n",
+        "    janitor::clean_names()\n",
+        "\n",
+        "\n",
+        "ggplot(first_mod, aes(x = posterior_theta)) +\n",
+        "    stat_halfeye()\n",
+        "\n",
+        "```\n",
+        "\n",
+        "If we want to take a quick peak at some of summary statistics we can do \n"
+      ],
+      "id": "254b419f"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "az.summary(idata, kind = 'stats').round(2)"
+      ],
+      "id": "a11d9b71",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "WHich tells us roughly that 97% of the values is are going to be between 0.03 and 0.66 which is a lot more informative in my opinion than point estimates. One of the main benefits of Bayesian statistics is that we generally want to talk about the uncertainty rather than the point estimates.^[If I am understanding the whole bit of Bayesianism.] Arviz has a built in way to do this \n"
+      ],
+      "id": "19056777"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "az.plot_posterior(idata, point_estimate='median')"
+      ],
+      "id": "a031c976",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "We can also check the region of practical equivelence. In our coin flipping case this might be some reasonable values like between 45 and 55  for all intents and purposes we have a fair coin we just don't have enough data get a mean of like 0.5. We should probably have a better justification for why we chose this region. For a model of vote share a increase of 1-3 percent could be huge! \n"
+      ],
+      "id": "53646161"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "az.plot_posterior(idata, rope = [0.45, 0.55])"
+      ],
+      "id": "76ac662c",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## Gaussians\n",
+        "\n",
+        "Lets look at another toy example. Lets say that this is a reasonable model \n",
+        "\n",
+        "$$\n",
+        "\\begin{aligned}\n",
+        "\\mu \\sim Uniform(l, h) \\\\\n",
+        "\\sigma \\sim \\text{Half Normal}(\\sigma_\\sigma) \\\\\n",
+        "Y \\sim Normal(\\mu, \\sigma)\n",
+        "\\end{aligned}\n",
+        "$$\n",
+        "\n",
+        "In our case we are using a half normal which considers the absolute values of a noraml distribution to be centered around zero. So we are forcing our sigma to be positive because well it has to be. \n"
+      ],
+      "id": "313613df"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "#| code-fold: true\n",
+        "import pandas as pd \n",
+        "\n",
+        "molecules = np.loadtxt('https://raw.githubusercontent.com/aloctavodia/BAP3/refs/heads/main/code/data/chemical_shifts.csv')"
+      ],
+      "id": "f730944e",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "To model it we can do this \n"
+      ],
+      "id": "d329b47e"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "with pm.Model() as first_lin_model:\n",
+        "    mu = pm.Uniform(name = 'mu', lower = 40, upper = 70)\n",
+        "    sigma = pm.HalfNormal(name = 'sigma', sigma = 5)\n",
+        "    y = pm.Normal(name = 'Y',mu = mu, sigma = sigma, observed = molecules)\n",
+        "    out_lin = pm.sample(1000, nuts_sampler='nutpie')\n",
+        "\n",
+        "\n",
+        "az.plot_trace(out_lin)"
+      ],
+      "id": "9f7b1539",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "The diagnostic plots are looking pretty good. We can also plot the marginal distributions which I am not sure is the most informative plot for a lay audience. \n"
+      ],
+      "id": "384deaba"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "az.plot_pair(out_lin, kind = 'kde', marginals = True)"
+      ],
+      "id": "d5584f4f",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "We have seen that we can grab some summary statistics with `az.summary(out_lin)` but it is not the nicest looking table. However we can pass her to GT like this: \n"
+      ],
+      "id": "9c4b5a8c"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "from great_tables import GT\n",
+        "summ_stats = az.summary(out_lin, kind = 'stats').round(2)\n",
+        "\n",
+        "GT(summ_stats)\n"
+      ],
+      "id": "c984dd76",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "Which is slightly nicer than output of the `arviz` but the rownames don't transfer over which is annoying. We do need a little bit of tinkering but for the most part I don't really want to be in the table game all that often. \n",
+        "\n",
+        "\n",
+        "### Posterior predictive checks \n",
+        "\n",
+        "\n",
+        "The posterior predictive distribution is really just the distribution of future data given the model and observed data. Getting the posterior predictive is generally baked into all these Bayesian packages so we can really just do: "
+      ],
+      "id": "1ff4ba69"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "pm.sample_posterior_predictive(out_lin, model = first_lin_model, extend_inferencedata=True)\n"
+      ],
+      "id": "2596f75a",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "Then we can eyeball how good the predictions match the observed data by doing: \n"
+      ],
+      "id": "f37631e0"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "az.plot_ppc(out_lin, num_pp_samples=100, figsize=(12,4))"
+      ],
+      "id": "40642a16",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "For a model with not greatish priors It does kind of okay. The extreme observations in the data are kind of throwing off the predictions. If we were wanted to rip this off and hope that we get more data and that the model will look better with more data we are welcome to do that. However, if this is the data we need to account for these points with a little bit more robust of a prior. \n",
+        "\n",
+        "\n",
+        "## Robust regression \n",
+        "\n",
+        "By default with our OLS we are making an assumption about what the distribution looks like. In this case we are making the assumption that the data are normally distributed. This works a lot of the time but one of the core problems we are running into is that with a normal we are making the assumption that there are not a lot of data in the tails. \n"
+      ],
+      "id": "46219d84"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "ig, ax = plt.subplots()\n",
+        "ax.hist(molecules, bins=20, edgecolor='black', alpha=0.6)\n",
+        "\n",
+        "\n",
+        "rug_height = 0.05  \n",
+        "ymin, ymax = ax.get_ylim()\n",
+        "rug_ymin = ymin\n",
+        "rug_ymax = ymin + (ymax - ymin) * rug_height\n",
+        "\n",
+        "ax.vlines(molecules, rug_ymin, rug_ymax, color='black', alpha=0.7)\n"
+      ],
+      "id": "7b1f9532",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "We see some data in the tails. We could exclude them but generally this is probably not a good idea. There is nothing really wrong with the data unless we have reasons to suspect that there were data collection errors. It is generally better practice, in Bayesianism, to make our model more robust than to throw away information. \n",
+        "\n",
+        "\n",
+        "### Degrees of normality \n",
+        "\n",
+        "One of the nice things about stats is there are lots of problems that arise in lots of fields that people have had to deal with. One of the first one is how do we deal with deviations from the normal. Versions of the Student-T distribution arise a bit earlier than the Biometrika paper that introduces it in the English language.\n",
+        "\n",
+        "The history of the distribution is fun in of its self. William Sealy Gosset AKA Student was working at the Guinness Brewery working on small sample problems. You would like to assess the quality of ingredients or the quality of the beer without having to take a ton of units off the line. The more you sample the more cost you are incuring. So kind of by design the distribution can handle data in the tails. \n",
+        "\n",
+        "For a Student prior we can tune it in a variety of ways but in general we are really looking to make an assumption about how much stuff is in the tails. \n"
+      ],
+      "id": "70b9753f"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "for nu in [1, 2, 10]:\n",
+        "    pz.StudentT(nu, 0, 1).plot_pdf(support=(-5, 5), figsize=(12, 4))\n",
+        "\n",
+        "ax = pz.StudentT(np.inf, 0, 1).plot_pdf(support=(-5, 5), figsize=(12, 4), color=\"k\")\n",
+        "ax.get_lines()[-1].set_linestyle(\"--\")\n"
+      ],
+      "id": "8390af97",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "In general when we have smaller values than the more mass we have in the tails in the distribution. Roughly this just means that the heavier the tails are the less surprised we would be to find a point like 2 standard deviations away from the mean. \n",
+        "\n",
+        "\n",
+        "\n",
+        "## A robust version of the normal model\n",
+        "\n",
+        "\n",
+        "\n",
+        "So we are going to rewrite the same model just with the addition of a student prior and an exponential prior. So the model looks a bit different becuase we have to constrain the weights of the tails to be strictly positive. A really common prior for the this is the exponential prior. \n",
+        "$$\n",
+        "\\begin{aligned}\n",
+        "\\mu \\sim Uniform(l, h) \\\\\n",
+        "\\sigma \\sim \\text{Half Normal}(\\sigma_\\sigma) \\\\\n",
+        "\\nu \\sim Exponential(\\lambda) \\\\ \n",
+        "Y \\sim \\text{Student-T}(\\nu, \\mu, \\sigma)\n",
+        "\\end{aligned}\n",
+        "$$\n",
+        "Really any prior that constrains the values of $\\nu$ to be strictly positive would work. One thing that is a bit tricky about the exponential is that by default we are going to get the inverse of the mean. \n"
+      ],
+      "id": "4b121e26"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "with pm.Model() as model_t:\n",
+        "    mu = pm.Uniform(name = 'mu', lower = 40, upper = 70)\n",
+        "    nu = pm.Exponential('nu', 1/30)\n",
+        "    sigma = pm.HalfNormal(name = 'sigma', sigma = 10)\n",
+        "    y = pm.StudentT(name = 'Y',mu = mu, sigma = sigma, nu = nu, observed = molecules)\n",
+        "    out_t_mod = pm.sample(1000, nuts_sampler='nutpie') \n"
+      ],
+      "id": "d679c6d3",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "The exponential part is really grafting onto the tail of distribution. We are setting the \"mean\" around 30 which makes it mimic a Gaussian distribution. We are not forcing the model to be a strictly Gaussian or a strictly Student-T(?) but let it fall back on the Student-T distribution when needed. We are effecitvely saying that on average we expect 30 molecule somethings, but am open to the idea that there could be some events that happen that are big but these are not likely. When we look at the posterior predictive we see that it looks much better. \n"
+      ],
+      "id": "d1ac9d29"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "pm.sample_posterior_predictive(out_t_mod, model = model_t, extend_inferencedata=True)\n",
+        "\n",
+        "ax = az.plot_ppc(out_t_mod, figsize=(12,4), num_pp_samples=100)\n",
+        "ax.set_xlim(40,70)"
+      ],
+      "id": "fd482396",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "### Misc posterior stuff \n",
+        "\n",
+        "There are lot of ways to manipulate the posterior "
+      ],
+      "id": "d52e51d4"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "posterior = out_t_mod.posterior\n",
+        "\n",
+        "stack = az.extract(out_t_mod)"
+      ],
+      "id": "fe72f852",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "We are going to play around with it more a bit later. \n",
+        "\n",
+        "\n",
+        "### Groups comparision \n",
+        "\n",
+        "Often times we need to compare groups. Whether this is treatment and control groups, gender, or regions. One thing that really helps in a Bayesian context is to use contrast coding. In the book they use Pandas but that's never been the API of choice for me. We could to some preprocessing along these lines. "
+      ],
+      "id": "af0ab133"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "import catfact as fct\n",
+        "\n",
+        "tips = pl.read_csv('https://raw.githubusercontent.com/aloctavodia/BAP3/refs/heads/main/code/data/tips.csv')\n",
+        "\n",
+        "categories = np.array([\"Thur\", \"Fri\", \"Sat\", \"Sun\"])\n",
+        "\n",
+        "day_enum = pl.Enum(categories)\n",
+        "\n",
+        "# Cast the 'day' column to Enum and get the physical codes\n",
+        "tips = tips.with_columns(\n",
+        "    pl.col(\"day\").cast(day_enum).alias(\"day_enum\")\n",
+        ")\n",
+        "idx = tips[\"day_enum\"].to_physical().to_numpy()\n",
+        "tip = tips[\"tip\"]\n",
+        "\n",
+        "with pm.Model() as cat_model:\n",
+        "    mu = pm.Normal('mu', mu = 0, sigma = 10, shape = 4)\n",
+        "    sigma = pm.HalfNormal('sigma', sigma = 10, shape = 4)\n",
+        "    y = pm.Normal('y', mu = mu[idx], sigma = sigma[idx], observed= tip)"
+      ],
+      "id": "bc567145",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "However, PyMc includes a coordinates and dimensions which is really just a way of saying we can feed a dicitonary with our original variable and then our flattened variable for modeling. This just has the benefit of working better when visualizing things later. \n"
+      ],
+      "id": "4ec5829a"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "coords = {\"days\": categories, \"days_flat\": categories[idx]}\n",
+        "\n",
+        "with pm.Model(coords = coords) as comparing_groups:\n",
+        "    mu = pm.HalfNormal(\"mu\", sigma=5, dims=\"days\")\n",
+        "    sigma = pm.HalfNormal(\"sigma\", sigma=1, dims=\"days\")\n",
+        "   \n",
+        "    y = pm.Gamma(\"y\", mu=mu[idx], sigma=sigma[idx], observed=tip, dims=\"days_flat\") \n",
+        "    cat_data_out = pm.sample()\n",
+        "    cat_data_out.extend(pm.sample_posterior_predictive(cat_data_out))     "
+      ],
+      "id": "633e191d",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "So now when we co to plot it we can just extract it out with easy labels like this:\n"
+      ],
+      "id": "40bea53e"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "_, axes = plt.subplots(2,2)\n",
+        "\n",
+        "az.plot_ppc(cat_data_out, num_pp_samples=100, coords = {\"days_flat\" : [categories]}, flatten=[], ax = axes)"
+      ],
+      "id": "a816fe2f",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "We could use our trusty dusty Cohen's d or probability of superiority but a better way to do this is to use contrasts. \n"
+      ],
+      "id": "bb75f64d"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "cat_posterior = az.extract(cat_data_out)\n",
+        "\n",
+        "dist = pz.Normal(0,1)\n",
+        "\n",
+        "comparisions = [(categories[i], categories[j]) for i in range(4) for j in range(i+1, 4)]\n",
+        "\n",
+        "_, axes = plt.subplots(3,2, figsize = (12,6), sharex=True)\n",
+        "\n",
+        "for(i,j), ax in zip(comparisions, axes.ravel()): \n",
+        "    mean_diff = cat_posterior['mu'].sel(days = i) - cat_posterior['mu'].sel(days = j)\n",
+        "\n",
+        "    cohen_d = (mean_diff /\n",
+        "               np.sqrt((cat_posterior['sigma'].sel(days = i)**2 +\n",
+        "                        cat_posterior['sigma'].sel(days = j)**2) / 2)\n",
+        "    ).mean().item()\n",
+        "    ps = dist.cdf(cohen_d/(2**0.5))\n",
+        "    az.plot_posterior(mean_diff.values, ref_val=0, ax = ax)\n",
+        "    ax.set_title(f\"{i} - {j}\")\n",
+        "    ax.plot(0, label=f\"Cohen's d = {cohen_d:.2f}\\nProb sup = {ps:.2f}\", alpha=0)\n",
+        "    ax.legend(loc=1)"
+      ],
+      "id": "11388c0b",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## Excercise \n",
+        "\n",
+        "\n",
+        "1. Implement the coal mining disasters model yourself \n"
+      ],
+      "id": "421668b9"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "disaster_data = pl.Series(\n",
+        "    [4, 5, 4, 0, 1, 4, 3, 4, 0, 6, 3, 3, 4, 0, 2, 6,\n",
+        "    3, 3, 5, 4, 5, 3, 1, 4, 4, 1, 5, 5, 3, 4, 2, 5,\n",
+        "    2, 2, 3, 4, 2, 1, 3, np.nan, 2, 1, 1, 1, 1, 3, 0, 0,\n",
+        "    1, 0, 1, 1, 0, 0, 3, 1, 0, 3, 2, 2, 0, 1, 1, 1,\n",
+        "    0, 1, 0, 1, 0, 0, 0, 2, 1, 0, 0, 0, 1, 1, 0, 2,\n",
+        "    3, 3, 1, np.nan, 2, 1, 1, 1, 1, 2, 4, 2, 0, 0, 1, 4,\n",
+        "    0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1], strict = False\n",
+        "    \n",
+        ")\n",
+        "\n",
+        "years = np.arange(1851, 1962)"
+      ],
+      "id": "75940e82",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "The model is just a count model that looks like this \n",
+        "\n",
+        "\n",
+        "$$\n",
+        "\\begin{split}\n",
+        "\\begin{aligned}  \n",
+        "  D_t &\\sim \\text{Pois}(r_t), r_t= \\begin{cases}\n",
+        "   e, & \\text{if } t \\le s \\\\\n",
+        "   l, & \\text{if } t \\gt s\n",
+        "   \\end{cases} \\\\\n",
+        "  s &\\sim \\text{Unif}(t_l, t_h)\\\\         \n",
+        "  e &\\sim \\text{exp}(1)\\\\\n",
+        "  l &\\sim \\text{exp}(1)    \n",
+        "\\end{aligned}\n",
+        "\\end{split}\n",
+        "$$\n",
+        "\n",
+        "\n",
+        "\n",
+        "Where the model is specified as:\n",
+        "- Dt: The number of disasters in year \n",
+        "- rt: The rate parameter of the Poisson distribution of disasters in year t \n",
+        "- s: The year in which the rate parameter changes (the switchpoint).\n",
+        "- e: The rate parameter before the switchpoint s \n",
+        "- l The rate parameter after the switchpoint s\n",
+        "- tl, th:  The lower and upper boundaries of year t \n"
+      ],
+      "id": "89527cc1"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "with pm.Model() as coal_model:\n",
+        "    switchpoint = pm.DiscreteUniform('switchpoint', lower = years.min(), upper = years.max())\n",
+        "    e = pm.Exponential('e', 1.0)\n",
+        "    l = pm.Exponential('l', 1.0)\n",
+        "    rate = pm.math.switch(switchpoint >= years, e, l)\n",
+        "    dt = pm.Poisson('dt', rate, observed = disaster_data)\n",
+        "    coal_mod_out = pm.sample()"
+      ],
+      "id": "a3044698",
+      "execution_count": null,
+      "outputs": []
+    }
+  ],
+  "metadata": {
+    "kernelspec": {
+      "name": "python3",
+      "language": "python",
+      "display_name": "Python 3 (ipykernel)",
+      "path": "/Users/josh/Library/CloudStorage/Dropbox/learning-bayes/bayesian-analysis-with-python/.venv/share/jupyter/kernels/python3"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 5
+}
